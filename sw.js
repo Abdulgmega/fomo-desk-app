@@ -2,7 +2,7 @@
    Static shell: network-first, then cache.
    Relay/data requests (cache-busted or Supabase storage): network only, not stored.
 */
-const SHELL = "desk-shell-v10";
+const SHELL = "desk-shell-v11";
 const SHELL_URLS = [
   "./",
   "./index.html",

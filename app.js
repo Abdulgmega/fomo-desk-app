@@ -210,7 +210,7 @@
     for (var i = 0; i < text.length; i++) {
       var ch = text.charAt(i);
       if (/\d/.test(ch)) {
-        html += '<span class="digit" data-d="' + ch + '"><span style="transform:translateY(-' + (Number(ch) * 10) + '%)">0123456789</span></span>';
+        html += '<span class="digit" data-d="' + ch + '"><span style="transform:translateY(-' + Number(ch) + 'em)"><i>0</i><i>1</i><i>2</i><i>3</i><i>4</i><i>5</i><i>6</i><i>7</i><i>8</i><i>9</i></span></span>';
       } else {
         html += "<span>" + esc(ch) + "</span>";
       }

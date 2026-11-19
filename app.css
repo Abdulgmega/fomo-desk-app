@@ -154,8 +154,16 @@ a { text-decoration: none; }
   position: relative;
 }
 .odometer .digit > span {
-  display: block;
+  display: flex;
+  flex-direction: column;
   transition: transform 600ms ease-out;
+}
+.odometer .digit > span > i {
+  display: block;
+  height: 1em;
+  line-height: 1;
+  font-style: normal;
+  text-align: center;
 }
 .today {
   margin-top: 8px;
