@@ -210,7 +210,8 @@
     for (var i = 0; i < text.length; i++) {
       var ch = text.charAt(i);
       if (/\d/.test(ch)) {
-        html += '<span class="digit" data-d="' + ch + '"><span style="transform:translateY(-' + Number(ch) + 'em)"><i>0</i><i>1</i><i>2</i><i>3</i><i>4</i><i>5</i><i>6</i><i>7</i><i>8</i><i>9</i></span></span>';
+        var digits = "0123456789".split("").map(function (d) { return '<i style="display:block;height:1em;line-height:1;font-style:normal">' + d + '</i>'; }).join("");
+        html += '<span class="digit" data-d="' + ch + '" style="display:inline-block;height:1em;overflow:hidden;vertical-align:top"><span style="display:flex;flex-direction:column;transform:translateY(-' + Number(ch) + 'em)">' + digits + '</span></span>';
       } else {
         html += "<span>" + esc(ch) + "</span>";
       }
