@@ -1,8 +1,11 @@
-// FOMO Desk · plan B view-only app. The desk path from #d= is saved only to this device's localStorage.
+// FOMO Desk · plan B app. View-only except the PAPER/LIVE switch.
+// #d= (data path) is saved only to this device's localStorage.
+// A one-time #code= is exchanged for a device token, then stripped. Legacy #t= still works.
 (function () {
   "use strict";
 
   var STORAGE_KEY = "desk_data_path";
+  var TOKEN_KEY = "desk_app_token";
   var POLL_MS = 15000;
   var CORE_FILES = [
     "state.json", "positions.json", "activity.json", "chart.json",
@@ -28,6 +31,11 @@
   var seenActivityId = 0;
   var pollTimer = null;
   var tickTimer = null;
+  var appToken = "";
+  var modePending = false;
+  var modeError = "";
+  var pairingStatus = "";
+  var pairingBusy = false;
 
   var $app = document.getElementById("app");
   var $offline = document.getElementById("offline");
@@ -56,6 +64,34 @@
     try { return (localStorage.getItem(STORAGE_KEY) || "").trim(); } catch (e) { return ""; }
   }
 
+  function readToken() {
+    var raw = (location.hash || "").replace(/^#/, "");
+    var token = "";
+    if (raw) {
+      var params = new URLSearchParams(raw);
+      token = (params.get("t") || params.get("token") || "").trim();
+    }
+    if (token) {
+      try { localStorage.setItem(TOKEN_KEY, token); } catch (e) {}
+      return token;
+    }
+    try { return (localStorage.getItem(TOKEN_KEY) || "").trim(); } catch (e) { return ""; }
+  }
+
+  function readPairCode() {
+    var raw = (location.hash || "").replace(/^#/, "");
+    if (!raw) return "";
+    var params = new URLSearchParams(raw);
+    return (params.get("code") || params.get("pair") || "").trim();
+  }
+
+  function storeToken(token) {
+    token = String(token || "").trim();
+    if (!token) return;
+    try { localStorage.setItem(TOKEN_KEY, token); } catch (e) {}
+    appToken = token;
+  }
+
   function writeHash() {
     var params = new URLSearchParams();
     // Keep d= out of the visible hash after first save so we never leak it
@@ -68,9 +104,13 @@
     var cur = (location.hash || "").replace(/^#/, "");
     // Preserve a first-visit d= if that's all that's there and we haven't stored yet — already stored.
     var cleaned = cur;
-    if (cleaned.indexOf("d=") === 0 || cleaned.indexOf("&d=") !== -1) {
+    if (cleaned.indexOf("d=") === 0 || cleaned.indexOf("&d=") !== -1 || cleaned.indexOf("t=") !== -1 || cleaned.indexOf("token=") !== -1 || cleaned.indexOf("code=") !== -1 || cleaned.indexOf("pair=") !== -1) {
       var keep = new URLSearchParams(cleaned);
       keep.delete("d");
+      keep.delete("t");
+      keep.delete("token");
+      keep.delete("code");
+      keep.delete("pair");
       cleaned = keep.toString();
     }
     if (next !== cleaned) {
@@ -82,9 +122,11 @@
     var raw = (location.hash || "").replace(/^#/, "");
     var p = new URLSearchParams(raw);
     // Strip d= from the address bar once saved
-    if (p.get("d")) {
-      p.delete("d");
-    }
+    if (p.get("d")) p.delete("d");
+    if (p.get("t")) p.delete("t");
+    if (p.get("token")) p.delete("token");
+    if (p.get("code")) p.delete("code");
+    if (p.get("pair")) p.delete("pair");
     route.page = p.get("p") || p.get("tab") || "home";
     route.mint = p.get("mint") || null;
     if (p.get("range")) chartRange = p.get("range");
@@ -165,13 +207,36 @@
     return Math.round(h / 24) + "d old";
   }
 
+  function currentMode() {
+    return String((store.state && store.state.mode) || (store.account && store.account.mode) || "").toUpperCase();
+  }
+
   function isPaper() {
-    var mode = (store.state && store.state.mode) || (store.account && store.account.mode) || "";
-    return String(mode).toUpperCase() === "PAPER";
+    return currentMode() === "PAPER";
   }
 
   function paperPill() {
-    return isPaper() ? '<span class="pill orange">PAPER</span>' : "";
+    return isPaper() ? '<span class="pill blue">PAPER</span>' : "";
+  }
+
+  function modePill() {
+    var mode = currentMode();
+    if (mode === "PAPER") return '<span class="pill blue">PAPER</span>';
+    if (mode === "LIVE") return '<span class="pill red">LIVE</span>';
+    return "";
+  }
+
+  function modeSwitchHtml() {
+    var mode = currentMode();
+    var pending = modePending ? '<div class="ask">Switching…</div>' : "";
+    var err = (!modePending && modeError) ? '<div class="ask">' + esc(modeError) + "</div>" : "";
+    var pair = pairingStatus ? '<div class="ask">' + esc(pairingStatus) + "</div>" : "";
+    return '<div class="mode-wrap">' +
+      '<div class="mode-switch" role="group" aria-label="Desk mode">' +
+        '<button type="button" data-act="mode" data-mode="PAPER" class="paper' + (mode === "PAPER" ? " on" : "") + '"' + (modePending ? " disabled" : "") + ">PAPER</button>" +
+        '<button type="button" data-act="mode" data-mode="LIVE" class="live' + (mode === "LIVE" ? " on" : "") + '"' + (modePending ? " disabled" : "") + ">LIVE</button>" +
+      "</div>" + pending + err + pair +
+    "</div>";
   }
 
   function askNote() {
@@ -389,8 +454,11 @@
     }
 
     return navbar("Grok Bot ›", { brand: true, search: true, bell: true }) + search +
-      '<div class="balance-block"><div class="balance-row">' + odometerHtml(st.balance) + paperPill() + "</div>" +
-      '<div class="today">' + todayTxt + multTxt + "</div></div>" +
+      '<div class="balance-block"><div class="balance-row">' + odometerHtml(st.balance) + modePill() + "</div>" +
+      '<div class="today">' + todayTxt + multTxt + "</div>" +
+      (st.note ? '<div class="desk-note">' + esc(st.note) + "</div>" : "") +
+      modeSwitchHtml() +
+      "</div>" +
       '<div class="ranges">' +
         ["LIVE", "1H", "4H", "1D", "1W", "ALL"].map(function (r) {
           return '<button type="button" data-act="range" data-range="' + r + '" class="' + (chartRange === r ? "on" : "") + '">' + r + "</button>";
@@ -630,9 +698,9 @@
 
     return navbar("Account") +
       '<div class="section"><div class="card">' +
-        '<div class="row-44"><div>Mode</div><div>' + esc(mode) + " " + paperPill() + "</div></div>" +
+        '<div class="row-44"><div>Mode</div><div>' + esc(mode) + " " + modePill() + "</div></div>" +
+        modeSwitchHtml() +
         '<div class="row-44"><div>Cash</div><div class="num">' + esc(fmtMoney(acc.cash != null ? acc.cash : st.cash)) + "</div></div>" +
-        askNote() +
       "</div></div>" +
       '<div class="section stack">' + profile +
         '<button type="button" class="btn wide" data-act="invite">Invite a friend</button>' +
@@ -651,7 +719,11 @@
     var title = pack.title || "Copy picks";
     var body;
     if (pending) {
-      body = '<div class="empty">Waiting for FOMO login</div>';
+      var pendingNote = pack.note
+        || (pack.keymap === "PENDING"
+          ? "Leaderboard keys unmapped until a raw sample exists"
+          : "Waiting for FOMO login");
+      body = '<div class="empty">' + esc(pendingNote) + "</div>";
     } else {
       body = traders.map(function (t) {
         var buy = t.last_buy || {};
@@ -849,6 +921,11 @@
       render();
       return;
     }
+    if (act === "mode") {
+      ev.preventDefault();
+      requestMode(el.getAttribute("data-mode"));
+      return;
+    }
     if (act === "invite") {
       ev.preventDefault();
       var url = (store.account || {}).signup_url;
@@ -889,10 +966,203 @@
 
   /* ---------- boot ---------- */
 
+
+  function hexBytes(buf) {
+    return Array.prototype.map.call(new Uint8Array(buf), function (x) {
+      return ("0" + x.toString(16)).slice(-2);
+    }).join("");
+  }
+
+  function randomNonce() {
+    var bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    return hexBytes(bytes);
+  }
+
+  function signModeCommand(token, parts) {
+    var canonical = "v1|mode|" + parts.mode + "|" + (parts.confirm || "") + "|" + parts.ts + "|" + parts.nonce;
+    var enc = new TextEncoder();
+    return crypto.subtle.importKey("raw", enc.encode(token), { name: "HMAC", hash: "SHA-256" }, false, ["sign"])
+      .then(function (key) { return crypto.subtle.sign("HMAC", key, enc.encode(canonical)); })
+      .then(hexBytes);
+  }
+
+  function confirmLive() {
+    return new Promise(function (resolve) {
+      var wrap = document.createElement("div");
+      wrap.className = "mode-dialog";
+      wrap.innerHTML = '<div class="mode-dialog-card" role="dialog" aria-modal="true" aria-labelledby="mode-dialog-title">' +
+        '<h2 id="mode-dialog-title">Switch to LIVE?</h2>' +
+        "<p>Real money trades</p>" +
+        '<div class="mode-dialog-actions">' +
+          '<button type="button" class="btn" data-choice="cancel">Cancel</button>' +
+          '<button type="button" class="btn red" data-choice="ok">Switch to LIVE</button>' +
+        "</div></div>";
+      function finish(ok) {
+        wrap.remove();
+        resolve(!!ok);
+      }
+      wrap.addEventListener("click", function (ev) {
+        var btn = ev.target.closest("[data-choice]");
+        if (!btn) {
+          if (ev.target === wrap) finish(false);
+          return;
+        }
+        finish(btn.getAttribute("data-choice") === "ok");
+      });
+      document.body.appendChild(wrap);
+    });
+  }
+
+  function requestMode(next) {
+    next = String(next || "").toUpperCase();
+    if (next !== "PAPER" && next !== "LIVE") return;
+    if (next === currentMode() && !modeError) return;
+    if (!appToken) {
+      modeError = "Open the one-time pairing link from Telegram once to enable the switch. Ask in chat for a new link if it expired.";
+      render();
+      return;
+    }
+    var go = Promise.resolve(true);
+    if (next === "LIVE") go = confirmLive();
+    go.then(function (ok) {
+      if (!ok) return;
+      modePending = true;
+      modeError = "";
+      render();
+      return postModeCommand(next).then(function () {
+        return waitForMode(next, 8);
+      }).catch(function (err) {
+        modeError = (err && err.message) ? err.message : "Switch failed";
+      }).then(function () {
+        modePending = false;
+        render();
+      });
+    });
+  }
+
+  function postModeCommand(mode) {
+    var ts = Math.floor(Date.now() / 1000);
+    var nonce = randomNonce();
+    var confirm = mode === "LIVE" ? "LIVE" : "";
+    var payload = { action: "mode", mode: mode, confirm: confirm || null, ts: ts, nonce: nonce };
+    return signModeCommand(appToken, { mode: mode, confirm: confirm, ts: ts, nonce: nonce }).then(function (sig) {
+      payload.sig = sig;
+      return fetchJson("command_inbox.json").then(function (meta) {
+        var url = meta && meta.upload;
+        if (!url) throw new Error("Desk inbox is not ready. Try again in a few seconds.");
+        return fetch(url, {
+          method: "PUT",
+          headers: { "content-type": "application/json", "x-upsert": "true" },
+          body: JSON.stringify(payload)
+        }).then(function (res) {
+          if (res.ok) return res;
+          return fetch(url, {
+            method: "POST",
+            headers: { "content-type": "application/json", "x-upsert": "true" },
+            body: JSON.stringify(payload)
+          });
+        }).then(function (res) {
+          if (!res.ok) throw new Error("Could not send the mode command");
+        });
+      });
+    });
+  }
+
+  function waitForMode(want, tries) {
+    tries = tries || 6;
+    function once(left) {
+      return loadCore().then(function () {
+        if (currentMode() === want) {
+          modeError = "";
+          return;
+        }
+        if (left <= 0) {
+          modeError = "Sent. Waiting for the desk to apply the switch.";
+          return;
+        }
+        return new Promise(function (resolve) { setTimeout(resolve, 2000); }).then(function () { return once(left - 1); });
+      });
+    }
+    return once(tries);
+  }
+
+  function pairReason(reason) {
+    if (reason === "expired") return "This link has expired. Ask in chat for a new one.";
+    if (reason === "used") return "This link was already used. Ask in chat for a new one.";
+    if (reason === "invalid") return "This pairing link is not valid. Ask in chat for a new one.";
+    return "Pairing failed. Ask in chat for a new link.";
+  }
+
+  function putJson(url, payload) {
+    return fetch(url, {
+      method: "PUT",
+      headers: { "content-type": "application/json", "x-upsert": "true" },
+      body: JSON.stringify(payload)
+    }).then(function (res) {
+      if (res.ok) return res;
+      return fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-upsert": "true" },
+        body: JSON.stringify(payload)
+      });
+    });
+  }
+
+  function waitForPairResult(nonce, tries) {
+    var name = "inbox/p" + nonce + ".json";
+    function once(left) {
+      return fetchJson(name).then(function (data) {
+        if (data && data.ok && data.token) return data.token;
+        if (data && data.ok === false) throw new Error(pairReason(data.reason));
+        if (left <= 0) throw new Error("Pairing timed out. Ask in chat for a new link.");
+        return new Promise(function (resolve) { setTimeout(resolve, 2000); }).then(function () {
+          return once(left - 1);
+        });
+      }).catch(function (err) {
+        if (err && err.message && err.message.indexOf("This link") === 0) throw err;
+        if (err && err.message && err.message.indexOf("Pairing") === 0) throw err;
+        if (left <= 0) throw new Error("Pairing timed out. Ask in chat for a new link.");
+        return new Promise(function (resolve) { setTimeout(resolve, 2000); }).then(function () {
+          return once(left - 1);
+        });
+      });
+    }
+    return once(tries || 15);
+  }
+
+  function redeemPairing(code) {
+    if (!code || pairingBusy) return Promise.resolve();
+    pairingBusy = true;
+    pairingStatus = "Pairing this phone…";
+    render();
+    var nonce = randomNonce();
+    return fetchJson("command_inbox.json").then(function (meta) {
+      var url = meta && meta.pair_upload;
+      if (!url) throw new Error("Desk inbox is not ready. Try again in a few seconds.");
+      return putJson(url, { action: "pair", code: code, nonce: nonce, ts: Math.floor(Date.now() / 1000) }).then(function (res) {
+        if (!res.ok) throw new Error("Could not send the pairing request");
+        return waitForPairResult(nonce, 15);
+      });
+    }).then(function (token) {
+      storeToken(token);
+      pairingStatus = "This phone is paired. You can delete the Telegram message.";
+      writeHash();
+      render();
+    }).catch(function (err) {
+      pairingStatus = (err && err.message) ? err.message : "Pairing failed. Ask in chat for a new link.";
+      render();
+    }).then(function () {
+      pairingBusy = false;
+    });
+  }
+
   function boot() {
     dataPath = readDataPath();
+    var pairCode = readPairCode();
+    appToken = readToken();
     readRoute();
-    // Drop d= from the address bar after saving it locally (never put it in web/ files).
+    // Drop d=, t=, and the one-time code from the address bar after saving locally.
     writeHash();
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("./sw.js").catch(function () {});
@@ -908,6 +1178,7 @@
       return;
     }
     render();
+    if (pairCode) redeemPairing(pairCode);
     loadCore().then(render);
     pollTimer = setInterval(function () {
       loadCore().then(function () { render(); });
@@ -915,7 +1186,10 @@
     tickTimer = setInterval(tickOffline, 1000);
     window.addEventListener("hashchange", function () {
       dataPath = readDataPath() || dataPath;
+      var laterCode = readPairCode();
       readRoute();
+      writeHash();
+      if (laterCode) redeemPairing(laterCode);
       render();
     });
     window.addEventListener("resize", function () { paintCharts(); });

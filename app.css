@@ -175,6 +175,13 @@ a { text-decoration: none; }
 .today .pct { font-size: 17px; font-weight: 600; }
 .today .up { color: var(--green); }
 .today .down { color: var(--red); }
+.desk-note {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--secondary);
+  max-width: 100%;
+}
 .pill {
   font-family: var(--mono);
   font-size: 13px;
@@ -504,3 +511,51 @@ a { text-decoration: none; }
   .odometer .digit > span { transition: none !important; }
   .live-frame img { transition: none !important; }
 }
+
+.pill.blue { color: var(--blue); background: rgba(10, 132, 255, 0.18); }
+.mode-wrap { margin: 12px 0 4px; }
+.mode-switch {
+  display: flex;
+  width: 100%;
+  max-width: 280px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--card2);
+  background: var(--card);
+}
+.mode-switch button {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--secondary);
+  font: inherit;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+.mode-switch button.paper.on { background: var(--blue); color: #fff; }
+.mode-switch button.live.on { background: var(--red); color: #fff; }
+.mode-switch button:disabled { opacity: 0.6; cursor: default; }
+.mode-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(0,0,0,0.62);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.mode-dialog-card {
+  width: 100%;
+  max-width: 320px;
+  background: var(--card);
+  border-radius: 16px;
+  padding: 20px;
+}
+.mode-dialog-card h2 { margin: 0 0 8px; font-size: 20px; }
+.mode-dialog-card p { margin: 0 0 16px; color: var(--secondary); }
+.mode-dialog-actions { display: flex; gap: 8px; }
+.mode-dialog-actions .btn { flex: 1; }
+.mode-dialog-actions .btn.red { background: var(--red); color: #fff; }
