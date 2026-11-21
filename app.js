@@ -34,6 +34,9 @@
   var appToken = "";
   var modePending = false;
   var modeError = "";
+  var modeBusy = false;
+  var modeWanted = "";
+  var modeIgnoreClicksUntil = 0;
   var pairingStatus = "";
   var pairingBusy = false;
 
@@ -227,14 +230,15 @@
   }
 
   function modeSwitchHtml() {
-    var mode = currentMode();
-    var pending = modePending ? '<div class="ask">Switching…</div>' : "";
+    var mode = modePending && modeWanted ? modeWanted : currentMode();
+    var busy = modePending || modeBusy;
+    var pending = modePending ? '<div class="ask">Switching to ' + esc(modeWanted || mode) + "…</div>" : "";
     var err = (!modePending && modeError) ? '<div class="ask">' + esc(modeError) + "</div>" : "";
     var pair = pairingStatus ? '<div class="ask">' + esc(pairingStatus) + "</div>" : "";
     return '<div class="mode-wrap">' +
       '<div class="mode-switch" role="group" aria-label="Desk mode">' +
-        '<button type="button" data-act="mode" data-mode="PAPER" class="paper' + (mode === "PAPER" ? " on" : "") + '"' + (modePending ? " disabled" : "") + ">PAPER</button>" +
-        '<button type="button" data-act="mode" data-mode="LIVE" class="live' + (mode === "LIVE" ? " on" : "") + '"' + (modePending ? " disabled" : "") + ">LIVE</button>" +
+        '<button type="button" data-act="mode" data-mode="PAPER" class="paper' + (mode === "PAPER" ? " on" : "") + '"' + (busy ? " disabled" : "") + ">PAPER</button>" +
+        '<button type="button" data-act="mode" data-mode="LIVE" class="live' + (mode === "LIVE" ? " on" : "") + '"' + (busy ? " disabled" : "") + ">LIVE</button>" +
       "</div>" + pending + err + pair +
     "</div>";
   }
@@ -999,10 +1003,14 @@
           '<button type="button" class="btn red" data-choice="ok">Switch to LIVE</button>' +
         "</div></div>";
       function finish(ok) {
+        wrap.style.pointerEvents = "none";
         wrap.remove();
+        modeIgnoreClicksUntil = Date.now() + 500;
         resolve(!!ok);
       }
       wrap.addEventListener("click", function (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
         var btn = ev.target.closest("[data-choice]");
         if (!btn) {
           if (ev.target === wrap) finish(false);
@@ -1017,25 +1025,37 @@
   function requestMode(next) {
     next = String(next || "").toUpperCase();
     if (next !== "PAPER" && next !== "LIVE") return;
-    if (next === currentMode() && !modeError) return;
+    if (modeBusy || modePending) return;
+    if (Date.now() < modeIgnoreClicksUntil) return;
+    if (next === currentMode() && !modeError && !modeWanted) return;
     if (!appToken) {
       modeError = "Open the one-time pairing link from Telegram once to enable the switch. Ask in chat for a new link if it expired.";
       render();
       return;
     }
+    modeBusy = true;
+    modeWanted = next;
     var go = Promise.resolve(true);
     if (next === "LIVE") go = confirmLive();
     go.then(function (ok) {
-      if (!ok) return;
+      if (!ok) {
+        modeBusy = false;
+        modeWanted = "";
+        render();
+        return;
+      }
       modePending = true;
       modeError = "";
       render();
       return postModeCommand(next).then(function () {
-        return waitForMode(next, 8);
+        return waitForMode(next, 20);
       }).catch(function (err) {
         modeError = (err && err.message) ? err.message : "Switch failed";
       }).then(function () {
         modePending = false;
+        modeBusy = false;
+        if (currentMode() === next) modeWanted = "";
+        modeIgnoreClicksUntil = Date.now() + 400;
         render();
       });
     });
